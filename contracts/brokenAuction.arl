@@ -1,0 +1,98 @@
+archetype brokenAuction
+
+// a counter that will increment every time someone mints a new NFT
+variable next_tokenID: int = 1
+constant alice: address = tz1N4CJxuNpyuySnemPTVvF6qH52DWtUTzc4
+constant bob: address = tz1aSkwEot3L2kmUvcoxzjMomb9mvBNuzFK6
+
+
+// An asset of items on sale. 
+// For each tokenID, a seller, deadline, topBid and topBidder
+asset items {
+  i_tokenID: int;
+  seller: address;
+  deadline: date;
+  topBid: tez;
+  topBidder: address;
+}
+// An asset that stores metadata and the owner of each tokenID
+asset tokens {
+  t_tokenID: int;
+  owner: address;
+  token_md: string;
+}
+
+entry mint(m_token_md: string) {
+  require {
+    // When minting, you pay 1 tez for the service
+    mint_r1: transferred = 1tz;
+  }
+  effect {
+    tokens.add({
+      t_tokenID = next_tokenID;
+      owner = caller;
+      token_md = m_token_md
+      });
+    next_tokenID := next_tokenID + 1;
+  }
+}
+// We create an oction for a given token. People can bid until a deadline
+// We keep track of the topBid and topBidder. The seller is the initial topBidder for 0 tez.
+
+entry openAuction(oa_itemID: int, oa_seller: address, oa_deadline: date) {
+  items.add({
+    i_tokenID = oa_itemID;
+    seller = oa_seller;
+    deadline = oa_deadline;
+    topBid = 0tz;
+    topBidder = oa_seller
+    });
+}
+
+entry bid(b_itemID: int) {
+  require {
+    // We check that they bid more than the current top Bid, and that the deadline is not expired
+    bid_r1: transferred > items[b_itemID].topBid otherwise "You must bid more than the current top bid";
+    bid_r2: now < items[b_itemID].deadline otherwise "The auction is over";
+  }
+  effect {
+    // if caller = bob then begin
+    //   fail("hello - bob is caller")
+    // end;
+
+    // We reimburse the previous top bidder, and update the topBid and topBidder
+
+    //NOTE to Matthias: One of the errors in the contract is that a 0tz transfer is triggered here 
+    //If there has been no previous bid. I had to correct this to get the
+    //extortion attack to run to completion
+
+    if items[b_itemID].topBid > 0tz then begin
+    transfer items[b_itemID].topBid to items[b_itemID].topBidder;
+    end;
+
+
+
+    items.update(b_itemID, {
+      topBid = transferred;
+      topBidder = caller
+      });
+
+    //       if caller = alice then begin
+    //   fail("hello - alice is caller")
+    // end;
+  }
+}
+
+entry claimTopBid(c_itemID: int) {
+  //After the deadline, the seller can get the value of the top bid, and the ownership is transferred
+  require {
+    claimTopBid_r1: now > items[c_itemID].deadline;
+    claimTopBid_r2: caller = items[c_itemID].seller;
+  }
+  effect {
+    transfer items[c_itemID].topBid to caller;
+    tokens.update(c_itemID, {
+      owner = items[c_itemID].topBidder
+      });
+  }
+}
